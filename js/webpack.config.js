@@ -1,4 +1,4 @@
-var config = {
+module.exports = {
   module: {
     rules: [
       {
