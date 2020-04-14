@@ -1,0 +1,24 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "webpack --mode production",
+    "start": "webpack --mode development --watch -d"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lafranceinsoumise/wp-author-category.git"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.9.0",
+    "@babel/preset-env": "^7.9.0",
+    "@babel/preset-react": "^7.9.4",
+    "babel-loader": "^8.1.0",
+    "prettier": "^2.0.2",
+    "webpack": "^4.42.1",
+    "webpack-cli": "^3.3.11"
+  },
+  "dependencies": {
+    "@wordpress/editor": "^9.13.0",
+    "lodash": "^4.17.15"
+  }
+}

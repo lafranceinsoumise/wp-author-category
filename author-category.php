@@ -1,16 +1,15 @@
 <?php
 /*
-Plugin Name: Author Category
-Plugin URI: http://en.bainternet.info
-Description: simple plugin limit authors to post just in one category.
+Plugin Name: Author Category (LFI version)
+Plugin URI: https://github.com/lafranceinsoumise/wp-author-category
+Description: Simple plugin to limit categories authors can post to.
 Version: 0.8
-Author: Bainternet
-Author URI: http://en.bainternet.info
+Author: La France insoumise
+Author URI: https://github.com/lafranceinsoumise/
 */
 /*
-        *   Copyright (C) 2012 - 2013 Ohad Raz
-        *   http://en.bainternet.info
-        *   admin@bainternet.info
+        *   Copyright (C) 2012 - 2013 Ohad Raz <admin@bainternet.info> (http://en.bainternet.info)
+        *   Copyright (C) 2020 La France insoumise <site@lafranceinsoumise.fr> (https://github.com/lafranceinsoumise)
 
         This program is free software; you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -30,176 +29,218 @@ Author URI: http://en.bainternet.info
 /* Disallow direct access to the plugin file */
 defined('ABSPATH') || die('Sorry, but you cannot access this page directly.');
 
-if (!class_exists('author_category')){
-    class author_category{
+if (!class_exists('author_category')) {
+    class author_category
+    {
         /**
          * $txtDomain
-         * 
+         *
          * Holds textDomain
-         * @since  0.7
          * @var string
          */
-        public  $txtDomain = 'author_cat';
+        public $txtDomain = 'author_cat';
+
+        public $user_cats = array();
 
         /**
-         * class constractor
-         * @author Ohad Raz
-         * @since 0.1
+         * get_user_cats
+         *
+         * @param null $user_id
+         * @return array|mixed
          */
-        public function __construct(){
-            
-            $this->hooks();
+        public function get_user_cats($user_id = null)
+        {
+            if ($user_id === null) {
+                global $current_user;
+                wp_get_current_user();
+                $user_id = $current_user->ID;
+            }
 
-            if (is_admin()){
-                $this->adminHooks();                
+            $cats = get_user_meta($user_id, '_author_cat', true);
+
+            if (empty($cats) || count($cats) <= 0 || !is_array($cats)) {
+                return array();
+            } else {
+                return $cats;
             }
         }
 
-        /**
-         * hooks add all action and filter hooks
-         * @since 0.6
-         * @return void
-         */
-        public function hooks(){
-            
-            // save user field
-            add_action( 'personal_options_update', array( $this,'save_extra_user_profile_fields' ));
-            add_action( 'edit_user_profile_update', array( $this,'save_extra_user_profile_fields' ));
-            // add user field
-            add_action( 'show_user_profile', array( $this,'extra_user_profile_fields' ));
-            add_action( 'edit_user_profile', array( $this,'extra_user_profile_fields' ));
+        public function __construct()
+        {
+            add_action('init', function () {
+                $this->user_cats = $this->get_user_cats();
+            });
+
+            // For site administrators
+            if (is_admin()) {
+                // add Author Categories section on users edit page
+                add_action('edit_user_profile', array($this, 'extra_user_profile_fields'));
+                add_action('edit_user_profile_update', array($this, 'save_extra_user_profile_fields'));
+
+                // our js removes unauthorized categories from Gutenber setting panels
+                add_action('enqueue_block_editor_assets', array($this, 'enqueue_js'));
+
+                // remove Yoast seo primary category picker (fucks with our js)
+                add_filter('wpseo_primary_term_taxonomies', array($this, 'remove_yoast'));
+
+                // remove unauthorized categories at save time
+                add_action("save_post_post", array($this, 'remove_unauthorized_categories'), 50, 2);
+
+                //add metabox
+                add_action('quick_edit_show_taxonomy', array($this, 'remove_quick_edit'), 0, 2);
+                add_action('add_meta_boxes', array( $this, 'add_meta_box' ));
+            }
+
+            // Add property to rest api result for guntenberg to know which to hide
+            add_filter('rest_api_init', array($this, 'rest_api_add_author_category_field'));
+
+
+            //add_filter('pre_option_default_category', array($this, 'user_default_category_option'));
 
             //xmlrpc post insert hook and quickpress
-            add_filter('xmlrpc_wp_insert_post_data', array($this, 'user_default_category'),2);
-            add_filter('pre_option_default_category',array($this, 'user_default_category_option'));
+            add_filter('xmlrpc_wp_insert_post_data', array($this, 'xmlrpc_default_category'), 2);
 
-            //post by email cat
-            add_filter( 'publish_phone',array($this,'post_by_email_cat'));
-        }
+            //post by email add category
+            add_filter('publish_phone', array($this,'post_by_email_default_category'));
 
-        /**
-         * hooks add all action and filter hooks for admin side
-         * 
-         * @since 0.7
-         * @return void
-         */
-        public function adminHooks(){
             //translations
             $this->load_translation();
-            //remove quick and bulk edit
-            global $pagenow;
-            if ('edit.php' == $pagenow)
-                add_action('admin_print_styles',array(&$this,'remove_quick_edit'));
+        }
 
-            //add metabox 
-            add_action( 'add_meta_boxes', array( $this, 'add_meta_box' ) );
-            //plugin links row
-            add_filter( 'plugin_row_meta', array($this,'_my_plugin_links'), 10, 2 );
+        public function enqueue_js()
+        {
+            if (empty($this->user_cats)) {
+                return;
+            }
 
-            //add admin panel
-            if (!class_exists('SimplePanel')){
-                require_once(plugin_dir_path(__FILE__).'inc/Simple_Panel_class.php');
-                require_once(plugin_dir_path(__FILE__).'inc/author_category_Panel_class.php');
+            wp_enqueue_script(
+                'author-category',
+                plugins_url('js/dist/main.js', __FILE__),
+                array('wp-edit-post', 'wp-editor', 'wp-compose', 'wp-api-fetch', 'wp-url')
+            );
+        }
+
+        /**
+         * remove Yoast primary taxonomy picker when we put or js
+         *
+         * @param $all_taxonomies
+         * @return array
+         */
+        public function remove_yoast($all_taxonomies)
+        {
+            if (empty($this->user_cats)) {
+                return $all_taxonomies;
+            }
+
+            return array();
+        }
+
+        /**
+         * remove unauthorized categories after saving
+         *
+         * @param $post_id
+         */
+        public function remove_unauthorized_categories($post_id)
+        {
+            if (empty($this->user_cats)) {
+                return;
+            }
+
+            $unfiltered_cats = wp_get_post_categories($post_id);
+            $authorized_cats = array_intersect($unfiltered_cats, $this->get_user_cats());
+
+            if (empty(array_diff($unfiltered_cats, $authorized_cats))) {
+                wp_set_post_categories($authorized_cats);
             }
         }
 
         /**
-         * user_default_category_option
-         * 
-         * function to overwrite the defult category option per user
-         * 
-         * @author Ohad   Raz
-         * @since 0.3
-         * 
-         * @param  boolea $false 
-         * @return mixed category id if user as a category set and false if he doesn't
+         * Adds a author_category field on rest api to be used by Guntenberg
          */
-        public function user_default_category_option($false){
-            $cat = $this->get_user_cat();
-            if (!empty($cat) && count($cat) > 0){
-                return $cat;
+        public function rest_api_add_author_category_field()
+        {
+            if (empty($this->user_cats)) {
+                return;
             }
-            return false;
+
+            register_rest_field('category', 'author_category', array(
+                'get_callback' => function ($term) {
+                    return in_array($term["id"], $this->get_user_cats());
+                },
+                'schema' => array(
+                    'description' => 'Is category authorized for author.',
+                    'type'        => 'boolean',
+                    'context'     =>  array('view')
+                ),
+            ));
         }
 
         /**
          * user_default_category
-         * 
+         *
          * function to handle XMLRPC calls
-         * 
-         * @author Ohad   Raz
-         * @since 0.3
-         * 
+         *
          * @param  array $post_data  post data
          * @param  array $con_stactu xmlrpc post data
-         * @return array 
+         * @return array
          */
-        public function user_default_category($post_data,$con_stactu){
-            $cat = $this->get_user_cat($post_data['post_author']);
-            if (!empty($cat) && $cat > 0){
-                $post_data['tax_input']['category'] = array($cat);
+        public function xmlrpc_default_category($post_data, $con_stactu)
+        {
+            if (!empty($this->user_cats)) {
+                $post_data['tax_input']['category'] = $this->user_cats;
             }
+
             return $post_data;
         }
 
         /**
-         * post_by_email_cat 
-         * 
-         * @author Ohad   Raz
-         * @since 0.5
-         * 
-         * @param  int $post_id 
-         * @return void
+         * post_by_email_default_category
+         *
+         * @param  int $post_id
          */
-        public function post_by_email_cat($post_id){
-            $p = get_post($post_id);
-            $cat = $this->get_user_cat($p['post_author']);
-            if ($cat){
+        public function post_by_email_default_category($post_id)
+        {
+            if (!empty($this->user_cats)) {
                 $email_post = array();
                 $email_post['ID'] = $post_id;
-                $email_post['post_category'] = array($cat);
+                $email_post['post_category'] = $this->user_cats;
                 wp_update_post($email_post);
-            }           
-        }
-
-        /**
-         * remove_quick_edit
-         * @author Ohad   Raz
-         * @since 0.1
-         * @return void
-         */
-        public function remove_quick_edit(){
-           global $current_user;
-            get_currentuserinfo();
-            $cat = $this->get_user_cat($current_user->ID);
-            if (!empty($cat) && count($cat) > 0){
-                echo '<style>.inline-edit-categories{display: none !important;}</style>';
             }
         }
 
         /**
-         * Adds the meta box container
-         * @author Ohad Raz
-         * @since 0.1
+         * remove_quick_edit
+         *
+         * @return bool
          */
-        public function add_meta_box(){
+        public function remove_quick_edit($show, $taxonomy_name)
+        {
+            if ($taxonomy_name == 'category' && !empty($this->user_cats)) {
+                return false;
+            }
 
-            global $current_user;
-            get_currentuserinfo();
+            return $show;
+        }
 
-            //get author categories
-            $cat = $this->get_user_cat($current_user->ID);
-            if (!empty($cat) && count($cat) > 0){
+        /**
+         * Adds the meta box container
+         */
+        public function add_meta_box()
+        {
+            if (!empty($this->user_cats)) {
                 //remove default metabox
                 remove_meta_box('categorydiv', 'post', 'side');
                 //add user specific categories
-                add_meta_box( 
-                     'author_cat'
-                    ,__( 'Author category',$this->txtDomain )
-                    ,array( &$this, 'render_meta_box_content' )
-                    ,'post' 
-                    ,'side'
-                    ,'low'
+                add_meta_box(
+                    'author_cat',
+                    __('Author category', $this->txtDomain),
+                    array( &$this, 'render_meta_box_content' ),
+                    'post',
+                    'side',
+                    'low',
+                    array(
+                        '__back_compat_meta_box' => true,
+                    )
                 );
             }
         }
@@ -207,49 +248,39 @@ if (!class_exists('author_category')){
 
         /**
          * Render Meta Box content
-         * @author Ohad   Raz
-         * @since 0.1
-         * @return Void
          */
-        public function render_meta_box_content(){
-            global $current_user;
-            get_currentuserinfo();
-            $cats = get_user_meta($current_user->ID,'_author_cat',true);
-            $cats = (array)$cats;
+        public function render_meta_box_content()
+        {
+            $cats = $this->get_user_cats();
             // Use nonce for verification
-            wp_nonce_field( plugin_basename( __FILE__ ), 'author_cat_noncename' );
-            if (!empty($cats) && count($cats) > 0){
-                if (count($cats) == 1){
-                    $c = get_category($cats[0]);
-                    echo __('this will be posted in: <strong>',$this->txtDomain) . $c->name .__('</strong> Category',$this->txtDomain);
-                    echo '<input name="post_category[]" type="hidden" value="'.$c->term_id.'">';
-                }else{
-                    echo '<span style="color: #f00;">'.__('Make Sure you select only the categories you want: <strong>',$this->txtDomain).'</span><br />';
-                    $options = get_option('author_cat_option');
-                    $checked =  (!isset($options['check_multi']))? ' checked="checked"' : '';
+            wp_nonce_field(plugin_basename(__FILE__), 'author_cat_noncename');
 
-                    foreach($cats as $cat ){
-                        $c = get_category($cat);
-                        echo '<label><input name="post_category[]" type="checkbox"'.$checked.' value="'.$c->term_id.'"> '.$c->name .'</label><br />';
-                    }
+            if (count($cats) == 1) {
+                $c = get_category($cats[0]);
+                echo __('this will be posted in: <strong>', $this->txtDomain) . $c->name .__('</strong> Category', $this->txtDomain);
+                echo '<input name="post_category[]" type="hidden" value="'.$c->term_id.'">';
+            } else {
+                echo '<span>'.__('Make sure you select only the categories you want: <strong>', $this->txtDomain).'</span><br />';
+                $options = get_option('author_cat_option');
+                $checked =  (!isset($options['check_multi']))? ' checked="checked"' : '';
+
+                foreach ($cats as $cat) {
+                    $c = get_category($cat);
+                    echo '<label><input name="post_category[]" type="checkbox"'.$checked.' value="'.$c->term_id.'"> '.$c->name .'</label><br />';
                 }
             }
-            do_action('in_author_category_metabox',$current_user->ID);
         }
 
         /**
          * This will generate the category field on the users profile
-         * @author Ohad   Raz
-         * @since 0.1
-         * @param  (object) $user 
-         * @return void
          */
-         public function extra_user_profile_fields( $user ){ 
-            //only admin can see and save the categories
-            if ( !current_user_can( 'manage_options' ) ) { return false; }
-            global $current_user;
-            get_currentuserinfo();
-            if ($current_user->ID == $user->ID) { return false; }
+        public function extra_user_profile_fields($user)
+        {
+            // only admin can see and save the categories
+            if (!current_user_can('manage_options')) {
+                return;
+            };
+
             $select = wp_dropdown_categories(array(
                             'orderby'      => 'name',
                             'show_count'   => 0,
@@ -257,114 +288,63 @@ if (!class_exists('author_category')){
                             'hide_empty'   => 0,
                             'echo'         => 0,
                             'name'         => 'author_cat[]'));
-            $saved = get_user_meta($user->ID, '_author_cat', true );
-            foreach((array)$saved as $c){
-                $select = str_replace('value="'.$c.'"','value="'.$c.'" selected="selected"',$select);
+            $saved = get_user_meta($user->ID, '_author_cat', true);
+            foreach ((array)$saved as $c) {
+                $select = str_replace('value="'.$c.'"', 'value="'.$c.'" selected="selected"', $select);
             }
-            $select = str_replace('<select','<select multiple="multiple"',$select);
-            echo '<h3>'.__('Author Category', 'author_cat').'</h3>
-            <table class="form-table">
-                <tr>
-                    <th><label for="author_cat">'.__('Category',$this->txtDomain).'</label></th>
+            $select = str_replace('<select', '<select multiple="multiple"', $select); ?> <h3><?= __('Author Category', 'author_cat') ?></h3>
+            <table class="form-table" role="presentation">
+                <tr id="author_cat">
+                    <th><label for="author_cat"><?= __('Category', $this->txtDomain) ?></label></th>
                     <td>
-                        '.$select.'
-                        <br />
-                    <span class="description">'.__('select a category to limit an author to post just in that category (use Crtl to select more then one).',$this->txtDomain).'</span>
+                        <?= $select ?>
+                        <p class="description">
+                            <?= __('select a category to limit an author to post just in that category (use Crtl to select more then one).', $this->txtDomain) ?>
+                        </p>
                     </td>
                 </tr>
-                <tr>
-                    <th><label for="author_cat_clear">'.__('Clear Category',$this->txtDomain).'</label></th>
+                <tr id="author_cat_clear">
+                    <th><label for="author_cat_clear"><?= __('Clear Category', $this->txtDomain) ?></label></th>
                     <td>
-                        <input type="checkbox" name="author_cat_clear" value="1" />
-                        <br />
-                    <span class="description">'.__('Check if you want to clear the limitation for this user.',$this->txtDomain).'</span>
+                        <p class="description">
+                            <input type="checkbox" name="author_cat_clear" value="1" />
+                            <?= __('Check if you want to clear the limitation for this user.', $this->txtDomain) ?>
+                        </p>
                     </td>
                 </tr>
-            </table>';
+            </table>
+            <?php
         }
 
 
         /**
          * This will save category field on the users profile
-         * @author Ohad   Raz
-         * @since 0.1
-         * @param  (int) $user_id 
-         * @return VOID
+         *
+         * @param  int $user_id
+         * @return bool
          */
-        public function save_extra_user_profile_fields( $user_id ) {
+        public function save_extra_user_profile_fields($user_id)
+        {
             //only admin can see and save the categories
-            if ( !current_user_can( 'manage_options') ) { return false; }
-
-            update_user_meta( $user_id, '_author_cat', $_POST['author_cat'] );
-                                                                                
-            if (isset($_POST['author_cat_clear']) && $_POST['author_cat_clear'] == 1)
-                delete_user_meta( $user_id, '_author_cat' );
-        }
-
-        /**
-         * save category on post 
-         * @author Ohad   Raz
-         * @since 0.1
-         * @deprecated 0.3
-         * @param  (int) $post_id 
-         * @return Void
-         */
-        public function author_cat_save_meta( $post_id ) {
-        }
-
-        public function get_user_cat($user_id = null){
-            if ($user_id === null){
-                global $current_user;
-                get_currentuserinfo();
-                $user_id = $current_user->ID;
+            if (!current_user_can('manage_options')) {
+                return false;
             }
-            $cat = get_user_meta($user_id,'_author_cat',true);
-            if (empty($cat) || count($cat) <= 0 || !is_array($cat))
-                return 0;
-            else
-                return $cat[0];
 
+            update_user_meta($user_id, '_author_cat', $_POST['author_cat']);
+                                                                                
+            if (isset($_POST['author_cat_clear']) && $_POST['author_cat_clear'] == 1) {
+                delete_user_meta($user_id, '_author_cat');
+            }
         }
 
         /**
-         * _my_plugin_links 
-         * 
-         * adds links to plugin row 
-         * 
-         * @author Ohad Raz <admin@bainternet.info>
-         * @since 0.3
-         * 
-         * @param  array $links 
-         * @param  string $file
-         * @return array
-         */
-        public function _my_plugin_links($links, $file) { 
-            $plugin = plugin_basename(__FILE__);  
-            if ($file == $plugin) // only for this plugin 
-                return array_merge( $links, 
-                    array( '<a href="http://en.bainternet.info/category/plugins">' . __('Other Plugins by this author',$this->txtDomain ) . '</a>' ), 
-                    array( '<a href="http://wordpress.org/support/plugin/author-category">' . __('Plugin Support',$this->txtDomain) . '</a>' ), 
-                    array( '<a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=K4MMGF5X3TM5L" target="_blank">' . __('Donate',$this->txtDomain) . '</a>' ) 
-                ); 
-            return $links;
-        }
-
-        /**
-         * load_translation 
-         * 
          * Loads translations
-         * 
-         * @author Ohad Raz <admin@bainternet.info>
-         * @since 0.7
-         * 
-         * @return void
          */
-        public function load_translation(){
-            load_plugin_textdomain( $this->txtDomain, false, dirname( plugin_basename( __FILE__ ) ) . '/languages/' );
+        public function load_translation()
+        {
+            load_plugin_textdomain($this->txtDomain, false, dirname(plugin_basename(__FILE__)) . '/languages/');
         }
-    }//end class
-}//end if
-//initiate the class on admin pages only
-if (is_admin()){
-    $ac = new author_category();
+    }
 }
+
+$ac = new author_category();
