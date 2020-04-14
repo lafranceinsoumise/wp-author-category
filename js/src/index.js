@@ -55,39 +55,31 @@ const getAuthorCategorySelector = (OriginalComponent) => {
     }
 
     renderTerms(renderedTerms) {
-      const { terms = [], taxonomy } = this.props;
-      const klass = taxonomy.hierarchical
-          ? "hierarchical"
-          : "non-hierarchical";
-
+      const { terms = [] } = this.props;
       renderedTerms = renderedTerms.filter(term => hideIfChildrenDisabled(term));
-
-      return renderedTerms.map((term) => {
-        const id = `editor-post-taxonomies-${klass}-term-${term.id}`;
+      return renderedTerms.map( ( term ) => {
         return (
             <div
-                key={term.id}
+                key={ term.id }
                 className="editor-post-taxonomies__hierarchical-terms-choice"
             >
-              <input
-                  id={id}
-                  className="editor-post-taxonomies__hierarchical-terms-input"
-                  type="radio"
-                  checked={terms.indexOf(term.id) !== -1}
-                  value={term.id}
-                  onChange={this.onChange}
+              <wp.components.CheckboxControl
+                  checked={ terms.indexOf( term.id ) !== -1 }
+                  onChange={ () => {
+                    const termId = parseInt( term.id, 10 );
+                    this.onChange( termId );
+                  } }
+                  label={ unescapeString( term.name ) }
                   disabled={!term.author_category}
-                  name={"radio_tax_input-" + this.props.slug}
               />
-              <label htmlFor={id}>{unescapeString(term.name)}</label>
-              {!!term.children.length && (
+              { !! term.children.length && (
                   <div className="editor-post-taxonomies__hierarchical-terms-subchoices">
-                    {this.renderTerms(term.children)}
+                    { this.renderTerms( term.children ) }
                   </div>
-              )}
+              ) }
             </div>
         );
-      });
+      } );
     }
   }
 
