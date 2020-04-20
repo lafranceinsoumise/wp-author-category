@@ -1,5 +1,5 @@
-import {buildTermsTree} from "@wordpress/editor/build/utils/terms";
-import {unescape as unescapeString} from "lodash";
+import buildTermsTree from './buildTermsTree';
+import unescapeString from "lodash/unescape";
 
 const DEFAULT_QUERY = {
   per_page: -1,

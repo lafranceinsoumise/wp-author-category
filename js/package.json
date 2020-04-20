@@ -20,7 +20,6 @@
     "webpack-manifest-plugin": "^2.2.0"
   },
   "dependencies": {
-    "@wordpress/editor": "^9.13.0",
     "lodash": "^4.17.15"
   }
 }
