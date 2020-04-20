@@ -113,10 +113,13 @@ if (!class_exists('author_category')) {
                 return;
             }
 
+            $assets = json_decode(file_get_contents(plugin_dir_path(__FILE__). '/js/dist/manifest.json'), true);
+
             wp_enqueue_script(
                 'author-category',
-                plugins_url('js/dist/main.js', __FILE__),
-                array('wp-edit-post', 'wp-editor', 'wp-compose', 'wp-api-fetch', 'wp-url')
+                plugins_url('js/dist/' . $assets["main.js"], __FILE__),
+                array('wp-edit-post', 'wp-editor', 'wp-compose', 'wp-api-fetch', 'wp-url'),
+                null
             );
         }
 
