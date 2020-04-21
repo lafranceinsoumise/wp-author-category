@@ -260,7 +260,8 @@ if (!class_exists('author_category')) {
 
             if (count($cats) == 1) {
                 $c = get_category($cats[0]);
-                echo __('this will be posted in: <strong>', $this->txtDomain) . $c->name .__('</strong> Category', $this->txtDomain);
+                echo __('this will be posted in: <strong>', $this->txtDomain) . esc_html($c->name)
+                    .__('</strong> Category', $this->txtDomain);
                 echo '<input name="post_category[]" type="hidden" value="'.$c->term_id.'">';
             } else {
                 echo '<span>'.__('Make sure you select only the categories you want: <strong>', $this->txtDomain).'</span><br />';
@@ -269,7 +270,8 @@ if (!class_exists('author_category')) {
 
                 foreach ($cats as $cat) {
                     $c = get_category($cat);
-                    echo '<label><input name="post_category[]" type="checkbox"'.$checked.' value="'.$c->term_id.'"> '.$c->name .'</label><br />';
+                    echo '<label><input name="post_category[]" type="checkbox"'.$checked.' value="'.$c->term_id.'">'
+                        .esc_html($c->name).'</label><br />';
                 }
             }
         }
@@ -295,7 +297,8 @@ if (!class_exists('author_category')) {
             foreach ((array)$saved as $c) {
                 $select = str_replace('value="'.$c.'"', 'value="'.$c.'" selected="selected"', $select);
             }
-            $select = str_replace('<select', '<select multiple="multiple"', $select); ?> <h3><?= __('Author Category', 'author_cat') ?></h3>
+            $select = str_replace('<select', '<select multiple="multiple"', $select); ?>
+            <h3><?= __('Author Category', 'author_cat') ?></h3>
             <table class="form-table" role="presentation">
                 <tr id="author_cat">
                     <th><label for="author_cat"><?= __('Category', $this->txtDomain) ?></label></th>
@@ -310,7 +313,7 @@ if (!class_exists('author_category')) {
                     <th><label for="author_cat_clear"><?= __('Clear Category', $this->txtDomain) ?></label></th>
                     <td>
                         <p class="description">
-                            <input type="checkbox" name="author_cat_clear" value="1" />
+                            <input type="checkbox" name="author_cat_clear" id="author_cat_clear" value="1" />
                             <?= __('Check if you want to clear the limitation for this user.', $this->txtDomain) ?>
                         </p>
                     </td>
@@ -333,11 +336,25 @@ if (!class_exists('author_category')) {
                 return false;
             }
 
-            update_user_meta($user_id, '_author_cat', $_POST['author_cat']);
+            $author_cat = sanitize_meta('_author_cat', $_POST['author_cat'], 'user');
+
+            if (!is_array($author_cat)) {
+                return false;
+            }
+
+            foreach ($author_cat as $cat) {
+                if (!is_numeric($cat) || !term_exists($cat, 'category')) {
+                    return false;
+                }
+            }
+
+            update_user_meta($user_id, '_author_cat', $author_cat);
                                                                                 
             if (isset($_POST['author_cat_clear']) && $_POST['author_cat_clear'] == 1) {
                 delete_user_meta($user_id, '_author_cat');
             }
+
+            return true;
         }
 
         /**
