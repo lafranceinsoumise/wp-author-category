@@ -3,7 +3,7 @@
 Plugin Name: Author Category (LFI version)
 Plugin URI: https://github.com/lafranceinsoumise/wp-author-category
 Description: Simple plugin to limit categories authors can post to.
-Version: 0.8
+Version: 0.8.1
 Author: La France insoumise
 Author URI: https://github.com/lafranceinsoumise/
 */
@@ -343,7 +343,7 @@ if (!class_exists('author_category')) {
             }
 
             foreach ($author_cat as $cat) {
-                if (!is_numeric($cat) || !term_exists($cat, 'category')) {
+                if (!is_numeric($cat) || !term_exists((int) $cat, 'category')) {
                     return false;
                 }
             }
